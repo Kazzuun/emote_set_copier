@@ -14,18 +14,30 @@ from models import EmoteSet, User
 ENDPOINT = "https://7tv.io/v3"
 
 
-def emote_set_from_id(emote_set_id: str) -> EmoteSet:
+def emote_set_from_id(emote_set_id: str) -> EmoteSet | None:
     url = f"{ENDPOINT}/emote-sets/{emote_set_id}"
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        print(f"Something went wrong fetching an emote set: {e}")
+        sys.exit(1)
     result = response.json()
     return EmoteSet(**result)
 
 
-def user_from_id(seventv_user_id: str) -> User:
+def user_from_id(seventv_user_id: str) -> User | None:
     url = f"{ENDPOINT}/users/{seventv_user_id}"
-    response = requests.get(url)
-    response.raise_for_status()
+    try:
+        response = requests.get(url)
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+    except requests.HTTPError as e:
+        print(f"Something went wrong fetching an emote set: {e}")
+        sys.exit(1)
     result = response.json()
     return User(**result)
 
@@ -56,7 +68,7 @@ def add_emote(token: str, emote_set_id: str, emote_id: str, name: str) -> None:
     try:
         response = requests.post(url=url, json=payload, headers=headers)
         response.raise_for_status()
-    except Exception as e:
+    except requests.HTTPError as e:
         print(f"Something went wrong adding an emote: {e}")
         sys.exit(1)
     data = response.json()
@@ -97,7 +109,7 @@ def create_emote_set(token: str, name: str, user_id: str) -> str:
     try:
         response = requests.post(url=url, json=payload, headers=headers)
         response.raise_for_status()
-    except Exception as e:
+    except requests.HTTPError as e:
         print(f"Something went wrong creating an emote set: {e}")
         sys.exit(1)
     data = response.json()
@@ -133,7 +145,7 @@ def update_emote_set(token: str, name: str, capacity: int, emote_set_id: str) ->
     try:
         response = requests.post(url=url, json=payload, headers=headers)
         response.raise_for_status()
-    except Exception as e:
+    except requests.HTTPError as e:
         print(f"Something went wrong updating emote set: {e}")
         sys.exit(1)
     data = response.json()
@@ -165,35 +177,55 @@ def get_user_id_from_token() -> str:
     return seventv_user_id
 
 
-def main():
-    seventv_user_id = get_user_id_from_token()
-    token = os.environ["TOKEN"]
-
+def get_copied_emote_set() -> EmoteSet:
     while True:
         emote_set_id = input("What is the id of the emote set you want to copy? ")
         if is_valid_id(emote_set_id):
             from_emote_set = emote_set_from_id(emote_set_id)
-            break
+            if from_emote_set is None:
+                print("Emote set not found.")
+            else:
+                return from_emote_set
         else:
             print("Invalid id")
 
+
+def get_target_user(own_seventv_id: str) -> User:
     while True:
         target_user_id = input(
             "What is the id of the user you want to copy the emote set for? Leave blank for self. "
         )
         if target_user_id == "":
-            target_user_id = seventv_user_id
+            target_user_id = own_seventv_id
             target_user = user_from_id(target_user_id)
-            break
+            if target_user is None:
+                print("User not found.")
+            else:
+                if not target_user.is_subscribed():
+                    print(
+                        "You are not subscribed so zero-width emotes won't be copied."
+                    )
+                return target_user
         elif is_valid_id(target_user_id):
             target_user = user_from_id(target_user_id)
-            if seventv_user_id not in [editor.id for editor in target_user.editors]:
+            if target_user is None:
+                print("User not found.")
+            elif (
+                own_seventv_id not in [editor.id for editor in target_user.editors]
+                and own_seventv_id != target_user_id
+            ):
                 print("You aren't an editor of that user.")
             else:
-                break
+                if not target_user.is_subscribed():
+                    print(
+                        "Target user isn't subscribed so zero-width emotes won't be copied."
+                    )
+                return target_user
         else:
             print("Invalid id.")
 
+
+def get_target_emote_set(token: str, target_user: User) -> EmoteSet:
     while True:
         target_emote_set_id = input(
             "What is the id of the emote set you want to copy into? Leave blank to create a new one. "
@@ -206,19 +238,33 @@ def main():
                 else:
                     print("Please provide a valid name for the emote set.")
             target_emote_set_id = create_emote_set(token, set_name, target_user.id)
-            capacity = max(emote_set.capacity for emote_set in target_user.emote_sets)
+            try:
+                capacity = max(emote_set.capacity for emote_set in target_user.emote_sets)
+            except ValueError:
+                capacity = 600
             update_emote_set(token, set_name, capacity, target_emote_set_id)
-            break
+            target_emote_set = emote_set_from_id(target_emote_set_id)
+            if target_emote_set is None:
+                print("Failed to find the new emote set. Try again.")
+            else:
+                return target_emote_set
         elif target_emote_set_id not in [
             emote_set.id for emote_set in target_user.emote_sets
         ]:
             print("User doesn't have an emote set matching the given id.")
-        elif is_valid_id(target_user_id):
-            break
+        elif is_valid_id(target_emote_set_id):
+            target_emote_set = emote_set_from_id(target_emote_set_id)
+            if target_emote_set is None:
+                print("Target emote set was not found.")
+            else:
+                return target_emote_set
         else:
             print("Invalid id.")
 
-    target_emote_set = emote_set_from_id(target_emote_set_id)
+
+def copy_emotes(
+    token: str, from_emote_set: EmoteSet, target_user: User, target_emote_set: EmoteSet
+) -> None:
     emotes_to_be_added = [
         emote
         for emote in from_emote_set.emotes
@@ -226,7 +272,6 @@ def main():
         and emote.name not in set(emote.name for emote in target_emote_set.emotes)
     ]
     if not target_user.is_subscribed():
-        print("Target user isn't subscribed so zero-width emotes won't be copied.")
         emotes_to_be_added = [
             emote for emote in emotes_to_be_added if not emote.data.flags.zero_width
         ]
@@ -249,6 +294,15 @@ def main():
         if i % 25 == 0:
             print(f"Progress: {i}/{nof_emotes_to_copy}")
     print("All emotes successfully copied!")
+
+
+def main():
+    seventv_user_id = get_user_id_from_token()
+    token = os.environ["TOKEN"]
+    from_emote_set = get_copied_emote_set()
+    target_user = get_target_user(seventv_user_id)
+    target_emote_set = get_target_emote_set(token, target_user)
+    copy_emotes(token, from_emote_set, target_user, target_emote_set)
 
 
 if __name__ == "__main__":
