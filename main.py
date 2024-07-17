@@ -22,7 +22,7 @@ def emote_set_from_id(emote_set_id: str) -> EmoteSet | None:
             return None
         response.raise_for_status()
     except requests.HTTPError as e:
-        print(f"Something went wrong fetching an emote set: {e}")
+        print(f"Something went wrong fetching the emote set: {e}")
         sys.exit(1)
     result = response.json()
     return EmoteSet(**result)
@@ -36,7 +36,7 @@ def user_from_id(seventv_user_id: str) -> User | None:
             return None
         response.raise_for_status()
     except requests.HTTPError as e:
-        print(f"Something went wrong fetching an emote set: {e}")
+        print(f"Something went wrong fetching the user: {e}")
         sys.exit(1)
     result = response.json()
     return User(**result)
@@ -203,7 +203,7 @@ def get_target_user(own_seventv_id: str) -> User:
             else:
                 if not target_user.is_subscribed():
                     print(
-                        "You are not subscribed so zero-width emotes won't be copied."
+                        "You are not subscribed, so zero-width emotes won't be copied."
                     )
                 return target_user
         elif is_valid_id(target_user_id):
@@ -218,7 +218,7 @@ def get_target_user(own_seventv_id: str) -> User:
             else:
                 if not target_user.is_subscribed():
                     print(
-                        "Target user isn't subscribed so zero-width emotes won't be copied."
+                        "Target user isn't subscribed, so zero-width emotes won't be copied."
                     )
                 return target_user
         else:
@@ -251,7 +251,7 @@ def get_target_emote_set(token: str, target_user: User) -> EmoteSet:
         elif target_emote_set_id not in [
             emote_set.id for emote_set in target_user.emote_sets
         ]:
-            print("User doesn't have an emote set matching the given id.")
+            print("Target user doesn't have an emote set matching the given id.")
         elif is_valid_id(target_emote_set_id):
             target_emote_set = emote_set_from_id(target_emote_set_id)
             if target_emote_set is None:
